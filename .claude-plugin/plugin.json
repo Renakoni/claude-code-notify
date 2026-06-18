@@ -1,0 +1,18 @@
+{
+  "name": "claude-code-notify",
+  "version": "0.1.0",
+  "description": "Play Windows notifications when Claude Code needs permission or finishes work.",
+  "author": {
+    "name": "Renakoni"
+  },
+  "repository": "https://github.com/Renakoni/claude-code-notify",
+  "license": "MIT",
+  "keywords": [
+    "claude-code",
+    "notification",
+    "hooks",
+    "windows",
+    "toast",
+    "sound"
+  ]
+}

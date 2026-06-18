@@ -1,0 +1,23 @@
+{
+  "soundEnabled": true,
+  "toastEnabled": false,
+  "maxSoundMilliseconds": 2500,
+  "sounds": {
+    "permission": "C:/Windows/Media/Windows Notify System Generic.wav",
+    "complete": "C:/Windows/Media/Windows Notify Calendar.wav",
+    "subagent": "C:/Windows/Media/Windows Notify Messaging.wav",
+    "error": "C:/Windows/Media/Windows Critical Stop.wav"
+  },
+  "toastTitles": {
+    "permission": "Claude Code needs permission",
+    "complete": "Claude Code finished",
+    "subagent": "Claude Code subagent finished",
+    "error": "Claude Code notifier error"
+  },
+  "toastMessages": {
+    "permission": "A command is waiting for your approval.",
+    "complete": "Claude finished responding.",
+    "subagent": "A subagent task finished.",
+    "error": "The notifier handled an error event."
+  }
+}
