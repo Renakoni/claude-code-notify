@@ -1,78 +1,160 @@
 # Claude Code Notify
 
-Claude Code plugin that plays a sound and can optionally show a desktop notification when Claude Code needs your permission or finishes a response.
+> 让 Claude Code 在需要你回来操作时，真的提醒你。
 
-## What it does
+Claude Code Notify 是一个 Claude Code 插件。当 Claude Code 需要权限确认，或者一轮回复完成时，它会播放提示音，也可以同时弹出桌面通知。
 
-- Plays a permission sound when Claude Code shows a permission confirmation prompt.
-- Plays a finish sound every time Claude finishes a turn.
-- Optionally shows desktop notifications.
-- Supports Windows and Linux with platform-specific fallbacks.
-- Supports custom local sound paths through `config/notifier.json`.
-- Caps playback duration so long audio files do not block the hook forever.
-- Copies custom sounds into plugin-managed storage so playback does not depend on the original source file.
-- Writes a local log for every notifier invocation.
+适合这些场景：
 
-## Notification types
+- 你把 Claude Code 放在后台跑任务，不想一直盯着终端。
+- Claude Code 卡在权限确认时，你希望马上知道。
+- 一轮任务结束后，你希望有明确提示。
+- 你想给不同事件设置不同声音。
 
-Claude Code Notify intentionally exposes only two user-facing events:
+English documentation: [README.en.md](README.en.md)
 
-- `permission`: Claude Code needs user approval or confirmation.
-- `finish`: Claude Code finished a response or task turn.
+## 安装
 
-There is no cooldown, debounce, or suppression. The goal is to alert every time user attention is needed or a turn finishes.
-
-## Install
-
-Add the marketplace:
+添加 marketplace：
 
 ```powershell
 claude plugin marketplace add https://github.com/Renakoni/claude-code-notify.git
 ```
 
-Install the plugin:
+安装插件：
 
 ```powershell
 claude plugin install claude-code-notify@claude-code-notify
 ```
 
-Then test inside Claude Code:
+安装后，在 Claude Code 里运行：
 
 ```text
 /claude-code-notify:test
 ```
 
-Configure interactively:
+如果你能听到声音，说明插件已经正常工作。
+
+## 功能
+
+- 权限确认时提醒：`permission`
+- 一轮回复完成时提醒：`finish`
+- 支持声音提醒
+- 支持桌面通知
+- 支持自定义 WAV / MP3
+- 自定义声音会复制到插件目录，避免原文件被移动或删除后失效
+- 播放窗口默认 3000ms，防止长音频阻塞 hook
+- 每次触发都会写日志，方便排查问题
+
+Claude Code Notify 只保留两个通知事件：
+
+| 事件 | 触发时机 | 目的 |
+| --- | --- | --- |
+| `permission` | Claude Code 请求权限确认 | 提醒你回来批准或拒绝 |
+| `finish` | Claude Code 完成一轮回复 | 提醒你任务已经结束 |
+
+## 常用命令
 
 ```text
+/claude-code-notify:test
 /claude-code-notify:config
+/claude-code-notify:preset
+/claude-code-notify:set-sound
+/claude-code-notify:enable-sound
+/claude-code-notify:disable-sound
+/claude-code-notify:enable-toast
+/claude-code-notify:disable-toast
 ```
 
-## Files
+推荐第一次安装后按这个顺序测试：
+
+1. 运行 `/claude-code-notify:test`
+2. 如果声音正常，运行 `/claude-code-notify:config` 调整声音或桌面通知
+3. 如果想换声音，运行 `/claude-code-notify:set-sound`
+
+## 自定义声音
+
+使用：
 
 ```text
-.claude-plugin/plugin.json                 Plugin metadata
-.claude-plugin/marketplace.json            Marketplace metadata
-config/notifier.json                       Built-in default config
-config/sounds/                             Managed custom sound storage
-hooks/hooks.json                           Claude Code hook configuration
-scripts/notify.js                          Cross-platform launcher
-scripts/notify.ps1                         Windows notifier
-scripts/notify.sh                          Linux notifier
-scripts/notify.cmd                         Windows wrapper for manual use
-tests/smoke-test.ps1                       Windows smoke test
-tests/smoke-test.sh                        Linux smoke test
+/claude-code-notify:set-sound
 ```
 
-## Configuration
+你可以分别设置：
 
-The plugin reads this file automatically on every hook invocation:
+- `permission`：权限确认提示音，建议更明显一点
+- `finish`：任务完成提示音，建议短促、舒适一点
+
+支持格式：
+
+| 系统 | 支持情况 |
+| --- | --- |
+| Windows | `.wav`、`.mp3` |
+| Linux | `.wav` 最稳；`.mp3` 依赖 `ffplay` 或 `mpg123` |
+
+设置后，插件会使用你选择的声音作为对应事件的提示音。
+
+## 音频长度
+
+插件不限制源文件长度，但会限制实际播放窗口。
+
+默认配置：
+
+```json
+{
+  "maxSoundMilliseconds": 3000
+}
+```
+
+合法范围：
+
+```text
+250-4500 ms
+```
+
+行为示例：
+
+| 音频长度 | 默认播放结果 |
+| --- | --- |
+| 0.2 秒 | 播放 0.2 秒 |
+| 2.5 秒 | 播放 2.5 秒 |
+| 3 秒 | 播放 3 秒 |
+| 20 秒 | 只播放前 3 秒 |
+
+建议使用 0.3-3 秒的短音频。长音频不会被拒绝，但只会播放开头部分。
+
+## 桌面通知
+
+可以开启桌面通知：
+
+```text
+/claude-code-notify:enable-toast
+```
+
+也可以关闭：
+
+```text
+/claude-code-notify:disable-toast
+```
+
+桌面通知是 best-effort：
+
+| 系统 | 实现 |
+| --- | --- |
+| Windows | Toast notification |
+| Linux | `notify-send` |
+
+如果系统通知被关闭、勿扰模式开启，或者 Linux 没有桌面通知环境，声音仍然可以继续工作。
+
+## 配置文件
+
+插件每次触发 hook 时都会读取：
 
 ```text
 config/notifier.json
 ```
 
-Example:
+默认配置示例：
 
 ```json
 {
@@ -94,85 +176,50 @@ Example:
 }
 ```
 
-`toastEnabled` is the config key for desktop notifications:
+一般不需要手动改这个文件，优先使用插件命令配置。
 
-- Windows: toast notification.
-- Linux: `notify-send` when available.
+## 工作原理
 
-Supported sound behavior:
+插件只绑定两个 Claude Code hook：
 
-- Windows: `.wav` through `System.Media.SoundPlayer`; `.mp3` through Windows Media Player COM when available.
-- Linux: configured sound through `paplay`, `aplay`, `ffplay`, or `mpg123`; terminal bell fallback.
+| Claude Code hook | 插件事件 |
+| --- | --- |
+| `PermissionRequest` | `permission` |
+| `Stop` | `finish` |
 
-Keep notification audio short. The script enforces `maxSoundMilliseconds` and clamps it to 250-4500 ms. The default is 3000 ms: shorter audio ends naturally when the player reports completion, while longer audio is stopped at the playback cap. Use 0.3-3 second sounds for best results.
-
-Custom sounds set through `/claude-code-notify:set-sound` are copied into `config/sounds/` and stored in `config/notifier.json` as relative paths such as `config/sounds/permission.wav`. Existing absolute paths still work, but copied relative paths are more robust because playback does not depend on the original source file remaining in place.
-
-## Slash commands
+入口脚本是：
 
 ```text
-/claude-code-notify:test
-/claude-code-notify:config
-/claude-code-notify:preset
-/claude-code-notify:set-sound
-/claude-code-notify:enable-sound
-/claude-code-notify:disable-sound
-/claude-code-notify:enable-toast
-/claude-code-notify:disable-toast
+scripts/notify.js
 ```
 
-The `enable-toast` and `disable-toast` commands control desktop notifications across platforms.
+它会根据平台分发到：
 
-## Test flow
+| 系统 | 脚本 |
+| --- | --- |
+| Windows | `scripts/notify.ps1` |
+| Linux | `scripts/notify.sh` |
 
-### Windows
+## 排查问题
 
-```powershell
-powershell -NoProfile -ExecutionPolicy Bypass -File "E:/claude-plugins/claude-code-beep-notifier/tests/smoke-test.ps1"
-powershell -NoProfile -ExecutionPolicy Bypass -File "E:/claude-plugins/claude-code-beep-notifier/scripts/notify.ps1" -Type permission
-powershell -NoProfile -ExecutionPolicy Bypass -File "E:/claude-plugins/claude-code-beep-notifier/scripts/notify.ps1" -Type finish
-```
+### 没有声音
 
-Log path:
+1. 先运行 `/claude-code-notify:test`
+2. 检查系统音量和输出设备
+3. 查看日志是否有记录
+4. Windows 确认声音文件存在
+5. Linux 确认安装了 `paplay`、`aplay`、`ffplay` 或 `mpg123`
 
-```text
-%TEMP%\claude-code-notify.log
-```
+### 没有桌面通知
 
-### Linux
+1. 确认 `toastEnabled` 是 `true`
+2. Windows 检查系统通知权限和勿扰模式
+3. Linux 检查是否安装并可用 `notify-send`
+4. 查看日志确认 hook 是否触发
 
-```bash
-sh tests/smoke-test.sh
-sh scripts/notify.sh --type permission
-sh scripts/notify.sh --type finish
-```
+### 插件没有触发
 
-Log path:
-
-```text
-${TMPDIR:-/tmp}/claude-code-notify.log
-```
-
-### WSL2
-
-WSL2 can partially test Linux shell logic, config loading, logs, and fallback behavior. It does not reliably prove native Linux desktop sound or desktop notification delivery unless WSLg/audio/notification bridges are configured.
-
-## Hook events
-
-The plugin uses only these Claude Code hook events:
-
-- `PermissionRequest` -> `permission`
-- `Stop` -> `finish`
-
-The hook entrypoint is `scripts/notify.js`, which dispatches to `notify.ps1` on Windows and `notify.sh` on Linux.
-
-## Troubleshooting
-
-- If no sound plays, run the platform smoke test outside Claude Code first.
-- If the smoke test logs success but you hear nothing, check system volume and output device.
-- If no log lines appear during Claude Code tests, the hook did not run or the plugin is not loaded.
-- If custom config is ignored, confirm it is named `config/notifier.json` inside the installed plugin.
-- If custom sound paths fail, use absolute paths and forward slashes where possible.
-- On Linux, install or enable a sound player such as `paplay`, `aplay`, `ffplay`, or `mpg123` for real audio playback.
-- On Windows, toast delivery is best-effort and uses a registered AppUserModelID shortcut.
-- Use `claude --debug` to inspect hook execution when testing inside Claude Code.
+1. 确认插件已启用：打开 `/plugin`
+2. 运行 `/claude-code-notify:test`
+3. 使用 `claude --debug` 查看 hook 执行情况
+4. 查看日志文件是否有新记录
