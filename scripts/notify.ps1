@@ -1,6 +1,6 @@
 param(
-    [ValidateSet('permission', 'complete', 'subagent', 'error')]
-    [string]$Type = 'complete',
+    [ValidateSet('permission', 'finish')]
+    [string]$Type = 'finish',
 
     [string]$LogPath = "$env:TEMP\claude-code-notify.log",
 
@@ -84,16 +84,102 @@ function Get-TypeValue {
     return [string]$property.Value
 }
 
+function Get-WavDurationMilliseconds {
+    param(
+        [string]$Path
+    )
+
+    try {
+        $stream = [System.IO.File]::OpenRead($Path)
+        try {
+            if ($stream.Length -lt 44) {
+                return $null
+            }
+
+            $reader = New-Object System.IO.BinaryReader $stream
+            $riff = [System.Text.Encoding]::ASCII.GetString($reader.ReadBytes(4))
+            $reader.ReadUInt32() | Out-Null
+            $wave = [System.Text.Encoding]::ASCII.GetString($reader.ReadBytes(4))
+            if ($riff -ne 'RIFF' -or $wave -ne 'WAVE') {
+                return $null
+            }
+
+            $byteRate = $null
+            $dataSize = $null
+            while ($stream.Position -le ($stream.Length - 8)) {
+                $chunkId = [System.Text.Encoding]::ASCII.GetString($reader.ReadBytes(4))
+                $chunkSize = [int]$reader.ReadUInt32()
+                $chunkStart = $stream.Position
+
+                if ($chunkId -eq 'fmt ' -and $chunkSize -ge 12) {
+                    $reader.ReadUInt16() | Out-Null
+                    $reader.ReadUInt16() | Out-Null
+                    $reader.ReadUInt32() | Out-Null
+                    $byteRate = [double]$reader.ReadUInt32()
+                } elseif ($chunkId -eq 'data') {
+                    $dataSize = [double]$chunkSize
+                }
+
+                $nextPosition = $chunkStart + $chunkSize
+                if (($chunkSize % 2) -eq 1) {
+                    $nextPosition++
+                }
+                if ($nextPosition -gt $stream.Length) {
+                    break
+                }
+                $stream.Position = $nextPosition
+
+                if ($null -ne $byteRate -and $null -ne $dataSize) {
+                    break
+                }
+            }
+
+            if ($null -eq $byteRate -or $byteRate -le 0 -or $null -eq $dataSize) {
+                return $null
+            }
+
+            return [int][Math]::Ceiling(($dataSize / $byteRate) * 1000)
+        } finally {
+            $stream.Dispose()
+        }
+    } catch {
+        return $null
+    }
+}
+
+function Resolve-SoundPath {
+    param(
+        [string]$Path,
+        [string]$Root
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $Path
+    }
+
+    if ([System.IO.Path]::IsPathRooted($Path)) {
+        return $Path
+    }
+
+    return Join-Path $Root ($Path -replace '/', '\')
+}
+
 function Play-WavFile {
     param(
         [string]$Path,
         [int]$MaxMilliseconds
     )
 
-    Write-NotifierLog "playing wav for up to $MaxMilliseconds ms"
+    $durationMilliseconds = Get-WavDurationMilliseconds -Path $Path
+    $playMilliseconds = $MaxMilliseconds
+    if ($null -ne $durationMilliseconds -and $durationMilliseconds -gt 0) {
+        $playMilliseconds = [Math]::Min($MaxMilliseconds, $durationMilliseconds)
+    }
+
+    Write-NotifierLog "playing wav for up to $playMilliseconds ms"
     $player = New-Object System.Media.SoundPlayer $Path
     $player.Play()
-    Start-Sleep -Milliseconds $MaxMilliseconds
+    Start-Sleep -Milliseconds $playMilliseconds
     $player.Stop()
     Write-NotifierLog "wav playback window finished"
 }
@@ -129,6 +215,113 @@ function Play-Mp3File {
     }
 }
 
+function Ensure-ToastAppIdentity {
+    $appId = 'ClaudeCode.Notify'
+    $shortcutDirectory = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
+    $shortcutPath = Join-Path $shortcutDirectory 'Claude Code Notify.lnk'
+
+    try {
+        if (-not (Test-Path $shortcutDirectory)) {
+            New-Item -ItemType Directory -Force -Path $shortcutDirectory | Out-Null
+        }
+
+        $shell = New-Object -ComObject WScript.Shell
+        $shortcut = $shell.CreateShortcut($shortcutPath)
+        $shortcut.TargetPath = (Get-Command powershell.exe).Source
+        $shortcut.Arguments = '-NoProfile'
+        $shortcut.WorkingDirectory = $PSScriptRoot
+        $shortcut.WindowStyle = 7
+        $shortcut.Description = 'Claude Code Notify'
+        $shortcut.Save()
+        $signature = @'
+using System;
+using System.Runtime.InteropServices;
+
+public static class AppUserModelIdWriter
+{
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    public struct PropertyKey
+    {
+        public Guid fmtid;
+        public uint pid;
+    }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, PreserveSig = false)]
+    private static extern void SHGetPropertyStoreFromParsingName(
+        string pszPath,
+        IntPtr pbc,
+        uint flags,
+        ref Guid riid,
+        out IPropertyStore propertyStore);
+
+    [ComImport]
+    [Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99")]
+    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
+    private interface IPropertyStore
+    {
+        void GetCount(out uint cProps);
+        void GetAt(uint iProp, out PropertyKey pkey);
+        void GetValue(ref PropertyKey key, out PropVariant pv);
+        void SetValue(ref PropertyKey key, ref PropVariant pv);
+        void Commit();
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct PropVariant
+    {
+        public ushort vt;
+        public ushort wReserved1;
+        public ushort wReserved2;
+        public ushort wReserved3;
+        public IntPtr p;
+        public int p2;
+    }
+
+    public static void SetAppUserModelId(string shortcutPath, string appId)
+    {
+        Guid propertyStoreGuid = new Guid("886D8EEB-8CF2-4446-8D02-CDBA1DBDCF99");
+        IPropertyStore propertyStore;
+        SHGetPropertyStoreFromParsingName(shortcutPath, IntPtr.Zero, 2, ref propertyStoreGuid, out propertyStore);
+
+        PropertyKey appIdKey = new PropertyKey
+        {
+            fmtid = new Guid("9F4C2855-9F79-4B39-A8D0-E1D42DE1D5F3"),
+            pid = 5
+        };
+
+        PropVariant value = new PropVariant
+        {
+            vt = 31,
+            p = Marshal.StringToCoTaskMemUni(appId)
+        };
+
+        try
+        {
+            propertyStore.SetValue(ref appIdKey, ref value);
+            propertyStore.Commit();
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(value.p);
+            Marshal.ReleaseComObject(propertyStore);
+        }
+    }
+}
+'@
+
+        if (-not ('AppUserModelIdWriter' -as [type])) {
+            Add-Type -TypeDefinition $signature
+        }
+
+        [AppUserModelIdWriter]::SetAppUserModelId($shortcutPath, $appId)
+        Write-NotifierLog "toast app identity registered: $shortcutPath; app id: $appId"
+        return $appId
+    } catch {
+        Write-NotifierLog "toast app identity registration failed: $($_.Exception.Message)"
+        return $appId
+    }
+}
+
 function Show-ToastNotification {
     param(
         [string]$Title,
@@ -140,6 +333,7 @@ function Show-ToastNotification {
         [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
         [Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
 
+        $appId = Ensure-ToastAppIdentity
         $escapedTitle = [System.Security.SecurityElement]::Escape($Title)
         $escapedMessage = [System.Security.SecurityElement]::Escape($Message)
         $xml = @"
@@ -156,9 +350,9 @@ function Show-ToastNotification {
         $document = New-Object Windows.Data.Xml.Dom.XmlDocument
         $document.LoadXml($xml)
         $toast = [Windows.UI.Notifications.ToastNotification]::new($document)
-        $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('ClaudeCode.Notify')
+        $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appId)
         $notifier.Show($toast)
-        Write-NotifierLog "toast requested successfully"
+        Write-NotifierLog "toast requested successfully with app id: $appId"
     } catch {
         Write-NotifierLog "toast failed: $($_.Exception.Message)"
     }
@@ -187,29 +381,24 @@ try {
 
     $defaultSounds = @{
         permission = 'C:\Windows\Media\Windows Notify System Generic.wav'
-        complete = 'C:\Windows\Media\Windows Notify Calendar.wav'
-        subagent = 'C:\Windows\Media\Windows Notify Messaging.wav'
-        error = 'C:\Windows\Media\Windows Critical Stop.wav'
+        finish = 'C:\Windows\Media\Windows Notify Calendar.wav'
     }
 
     $defaultToastTitles = @{
         permission = 'Claude Code needs permission'
-        complete = 'Claude Code finished'
-        subagent = 'Claude Code subagent finished'
-        error = 'Claude Code notifier error'
+        finish = 'Claude Code finished'
     }
 
     $defaultToastMessages = @{
         permission = 'A command is waiting for your approval.'
-        complete = 'Claude finished responding.'
-        subagent = 'A subagent task finished.'
-        error = 'The notifier handled an error event.'
+        finish = 'Claude finished responding.'
     }
 
     $soundEnabled = Get-ConfigBoolean -Config $config -Name 'soundEnabled' -Default $true
     $toastEnabled = Get-ConfigBoolean -Config $config -Name 'toastEnabled' -Default $false
     $maxSoundMilliseconds = Get-ConfigInteger -Config $config -Name 'maxSoundMilliseconds' -Default 3000
     $soundPath = Get-TypeValue -Container $config.sounds -TypeName $Type -Default $defaultSounds[$Type]
+    $soundPath = Resolve-SoundPath -Path $soundPath -Root $repoRoot
     $toastTitle = Get-TypeValue -Container $config.toastTitles -TypeName $Type -Default $defaultToastTitles[$Type]
     $toastMessage = Get-TypeValue -Container $config.toastMessages -TypeName $Type -Default $defaultToastMessages[$Type]
 

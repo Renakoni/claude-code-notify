@@ -1,0 +1,22 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "claude-code-notify",
+  "version": "0.1.0",
+  "description": "Claude Code notification plugin marketplace.",
+  "owner": {
+    "name": "Renakoni",
+    "url": "https://github.com/Renakoni"
+  },
+  "plugins": [
+    {
+      "name": "claude-code-notify",
+      "description": "Play notification sounds and optional desktop notifications when Claude Code needs permission or finishes work.",
+      "version": "0.1.0",
+      "author": {
+        "name": "Renakoni"
+      },
+      "source": "./",
+      "category": "productivity"
+    }
+  ]
+}

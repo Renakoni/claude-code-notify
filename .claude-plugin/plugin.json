@@ -1,7 +1,7 @@
 {
   "name": "claude-code-notify",
   "version": "0.1.0",
-  "description": "Play Windows notifications when Claude Code needs permission or finishes work.",
+  "description": "Play notifications when Claude Code needs permission or finishes work.",
   "author": {
     "name": "Renakoni"
   },
@@ -12,7 +12,8 @@
     "notification",
     "hooks",
     "windows",
-    "toast",
+    "linux",
+    "desktop",
     "sound"
   ]
 }

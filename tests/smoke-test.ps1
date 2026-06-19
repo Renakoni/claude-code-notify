@@ -7,7 +7,7 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $notifyScript = Join-Path $repoRoot 'scripts\notify.ps1'
-$types = @('permission', 'complete', 'subagent', 'error')
+$types = @('permission', 'finish')
 
 Write-Host "Claude Code Notify smoke test"
 Write-Host "Notify script: $notifyScript"
